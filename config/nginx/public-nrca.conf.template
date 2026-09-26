@@ -1,0 +1,24 @@
+# domain1, public profile -- the National Root CA's distribution point behind Caddy.
+#
+# Plain HTTP on the loopback interface: Caddy terminates real Let's Encrypt TLS on 443 and
+# proxies here, so the demonstration needs no TLS material of its own. Caddy routes by Host,
+# so this server block accepts whatever it is handed.
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /srv/nrca;
+    autoindex off;
+    server_tokens off;
+
+    location = /nrca.pem {
+        default_type application/x-pem-file;
+        add_header Content-Disposition 'inline; filename="nrca.pem"';
+    }
+
+    location = /healthz { return 200 "ok\n"; }
+
+    # Nothing else is served. A web root that can be browsed is a web root that leaks.
+    location / { return 404; }
+}

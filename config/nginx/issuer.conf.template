@@ -1,0 +1,40 @@
+# domain3 / domain4 -- a credential issuer.
+#
+# Serves the DID document and the certificate chain, and nothing else. In particular it does
+# NOT proxy walt.id's management API: GET /issuer2/profiles returns the issuer's own private
+# key, so that port stays on the internal network.
+#
+# ${ISSUER_DOMAIN} is substituted by the nginx image's envsubst entrypoint.
+
+server {
+    listen 80;
+    listen 443 ssl;
+    http2 on;
+    server_name ${ISSUER_DOMAIN};
+
+    ssl_certificate     /tls/certs/${ISSUER_DOMAIN}.pem;
+    ssl_certificate_key /tls/private/${ISSUER_DOMAIN}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    root /srv/issuer;
+    autoindex off;
+    server_tokens off;
+
+    # did:web resolves to exactly this path.
+    location = /.well-known/did.json {
+        default_type application/did+json;
+        add_header Cache-Control 'no-cache';
+    }
+
+    # The x5u variant, used only to show that a chain held by reference cannot be
+    # followed when there is no network.
+    location = /.well-known/did.x5u.json {
+        default_type application/did+json;
+    }
+
+    location = /.well-known/pki/issuer-chain.pem {
+        default_type application/x-pem-file;
+    }
+
+    location / { return 404; }
+}

@@ -1,0 +1,69 @@
+# Public profile overrides.
+#
+# Differences from the self-contained stack:
+#
+#   * Each web server binds 127.0.0.1 on a high port. The Caddy already running on this host
+#     terminates real Let's Encrypt TLS on 443 and proxies to it, so the demonstration needs
+#     no TLS material of its own and never touches 80 or 443.
+#   * No Docker-network DNS aliases for the domain names: these hostnames resolve publicly,
+#     so `did:web` resolution uses real DNS.
+#   * State lives in state-public/, and the project name differs, so this can run alongside
+#     the local profile without either disturbing the other.
+#
+# Used as:  docker compose -p pki-in-did-public -f docker-compose.yml -f docker-compose.public.yml
+
+name: pki-in-did-public
+
+services:
+
+  nrca-web:
+    volumes:
+      - ./config/nginx/public-nrca.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state-public/web/nrca:/srv/nrca:ro
+    ports:
+      - "127.0.0.1:${NRCA_PORT:-8480}:80"
+    networks:
+      demo: {}
+
+  issuing-ca:
+    volumes:
+      - ./config/nginx/issuing-ca.nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./state-public/web/issuing-ca:/srv/issuing-ca:ro
+    ports:
+      - "127.0.0.1:${ISSUING_CA_PORT:-8481}:80"
+    networks:
+      demo: {}
+
+  ocsp-responder:
+    volumes:
+      - ./state-public/ca:/ca:ro
+
+  issuer-a-web:
+    volumes:
+      - ./config/nginx/public-issuer.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state-public/web/issuer-a:/srv/issuer:ro
+    ports:
+      - "127.0.0.1:${ISSUER_A_PORT:-8482}:80"
+    networks:
+      demo: {}
+
+  issuer-b-web:
+    volumes:
+      - ./config/nginx/public-issuer.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state-public/web/issuer-b:/srv/issuer:ro
+    ports:
+      - "127.0.0.1:${ISSUER_B_PORT:-8483}:80"
+    networks:
+      demo: {}
+
+  issuer-a-api:
+    volumes:
+      - ./state-public/waltid/issuer-a:/waltid-issuer-api2/config:ro
+
+  issuer-b-api:
+    volumes:
+      - ./state-public/waltid/issuer-b:/waltid-issuer-api2/config:ro
+
+networks:
+  demo:
+    name: pki-in-did-public_demo

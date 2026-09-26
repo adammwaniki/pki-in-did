@@ -1,0 +1,158 @@
+# The demonstration, as four organisations on one network.
+#
+# The four domain names are Docker-network DNS aliases, so `did:web:jacarandapropaganda.com`
+# resolves to the container that serves that organisation's DID document, over TLS issued by
+# the demonstration's own Web-TLS CA. Nothing here binds a host port: this machine's 80 and
+# 443 belong to something else.
+#
+# What is deliberately absent: the offline machine. The National Root CA's private key lives
+# in state/offline and is mounted only into the `--network none` container that
+# scripts/10-offline-root.sh and scripts/12-offline-sign-ca.sh run. It is not a service,
+# because it is not meant to be reachable.
+
+name: pki-in-did
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "5m", max-file: "3" }
+
+services:
+
+  # domain1 -- the National Root CA's public face: one certificate, nothing else.
+  nrca-web:
+    build: { context: ., dockerfile: images/web/Dockerfile }
+    image: pki-in-did/web
+    container_name: pki-nrca-web
+    restart: unless-stopped
+    environment:
+      NRCA_DOMAIN: ${NRCA_DOMAIN:-adamndegwa.com}
+    volumes:
+      - ./config/nginx/nrca.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state/web/nrca:/srv/nrca:ro
+      - ./state/tls:/tls:ro
+    networks:
+      demo:
+        aliases: [ "${NRCA_DOMAIN:-adamndegwa.com}" ]
+    <<: *logging
+
+  # domain2 -- the Issuing CA: the OCSP responder and the CRL, both over HTTP.
+  issuing-ca:
+    build: { context: ., dockerfile: images/ca-tools/Dockerfile }
+    image: pki-in-did/ca-tools
+    container_name: pki-issuing-ca
+    restart: unless-stopped
+    command: [ "serve" ]
+    volumes:
+      - ./config/nginx/issuing-ca.nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./state/web/issuing-ca:/srv/issuing-ca:ro
+    depends_on:
+      ocsp-responder:
+        condition: service_started
+    networks:
+      demo:
+        aliases: [ "${ISSUING_CA_DOMAIN:-mwaniki.dev}" ]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    <<: *logging
+
+  # The OCSP responder: `openssl ocsp`, behind domain2's nginx, as brief step 16 specifies.
+  #
+  # It reads the same index.txt that `openssl ca -revoke` maintains. A wrapper watches that
+  # file and restarts the responder when it changes, because `openssl ocsp` reads the
+  # database only at startup -- so "revoke, then verify again" needs nothing republished.
+  ocsp-responder:
+    build: { context: ., dockerfile: images/ca-tools/Dockerfile }
+    image: pki-in-did/ca-tools
+    container_name: pki-ocsp-responder
+    restart: unless-stopped
+    command: ["/usr/local/bin/ocsp-responder"]
+    environment:
+      CA_DIR: /ca
+      OCSP_PORT: "2560"
+      OCSP_RESPONSE_MINUTES: ${OCSP_RESPONSE_MINUTES:-5}
+    volumes:
+      - ./state/ca:/ca:ro
+    networks:
+      demo:
+        aliases: [ "ocsp-responder" ]
+    <<: *logging
+
+  # domain3 -- credential issuer A: DID document over HTTPS.
+  issuer-a-web:
+    build: { context: ., dockerfile: images/web/Dockerfile }
+    image: pki-in-did/web
+    container_name: pki-issuer-a-web
+    restart: unless-stopped
+    environment:
+      ISSUER_DOMAIN: ${ISSUER_A_DOMAIN:-jacarandapropaganda.com}
+    volumes:
+      - ./config/nginx/issuer.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state/web/issuer-a:/srv/issuer:ro
+      - ./state/tls:/tls:ro
+    networks:
+      demo:
+        aliases: [ "${ISSUER_A_DOMAIN:-jacarandapropaganda.com}" ]
+    <<: *logging
+
+  # domain4 -- credential issuer B: DID document over HTTPS.
+  issuer-b-web:
+    build: { context: ., dockerfile: images/web/Dockerfile }
+    image: pki-in-did/web
+    container_name: pki-issuer-b-web
+    restart: unless-stopped
+    environment:
+      ISSUER_DOMAIN: ${ISSUER_B_DOMAIN:-lawnbull.com}
+    volumes:
+      - ./config/nginx/issuer.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state/web/issuer-b:/srv/issuer:ro
+      - ./state/tls:/tls:ro
+    networks:
+      demo:
+        aliases: [ "${ISSUER_B_DOMAIN:-lawnbull.com}" ]
+    <<: *logging
+
+  # Credential issuer A's issuance service: walt.id issuer-api2, OpenID4VCI 1.0.
+  # Reachable only on the internal network -- GET /issuer2/profiles returns the private key.
+  issuer-a-api:
+    image: ${WALTID_IMAGE:-waltid/issuer-api2:1.0.0}
+    container_name: pki-issuer-a-api
+    restart: unless-stopped
+    volumes:
+      - ./state/waltid/issuer-a:/waltid-issuer-api2/config:ro
+    networks:
+      demo:
+        aliases: [ "issuer-a-api" ]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7005"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    <<: *logging
+
+  # Credential issuer B's issuance service.
+  issuer-b-api:
+    image: ${WALTID_IMAGE:-waltid/issuer-api2:1.0.0}
+    container_name: pki-issuer-b-api
+    restart: unless-stopped
+    volumes:
+      - ./state/waltid/issuer-b:/waltid-issuer-api2/config:ro
+    networks:
+      demo:
+        aliases: [ "issuer-b-api" ]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7005"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    <<: *logging
+
+networks:
+  demo:
+    name: pki-in-did_demo
+    driver: bridge

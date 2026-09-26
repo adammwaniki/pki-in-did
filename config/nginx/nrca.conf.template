@@ -1,0 +1,29 @@
+# domain1 -- the National Root CA's public distribution point.
+#
+# It serves exactly one file: the root certificate. The root private key lives on an offline
+# machine and is mounted into no container that has a network.
+#
+# ${NRCA_DOMAIN} is substituted by the nginx image's own envsubst entrypoint.
+
+server {
+    listen 80;
+    listen 443 ssl;
+    http2 on;
+    server_name ${NRCA_DOMAIN};
+
+    ssl_certificate     /tls/certs/${NRCA_DOMAIN}.pem;
+    ssl_certificate_key /tls/private/${NRCA_DOMAIN}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    root /srv/nrca;
+    autoindex off;
+    server_tokens off;
+
+    location = /nrca.pem {
+        default_type application/x-pem-file;
+        add_header Content-Disposition 'inline; filename="nrca.pem"';
+    }
+
+    # Nothing else is served. A web root that can be browsed is a web root that leaks.
+    location / { return 404; }
+}

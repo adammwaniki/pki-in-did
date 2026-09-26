@@ -1,0 +1,12 @@
+# The OCSP responder's own signing certificate.
+#
+# extendedKeyUsage OCSPSigning is what makes this a valid delegation from the Issuing CA;
+# without it the verifier refuses the responder's answers (RFC 6960).
+# noCheck stops a verifier asking the responder about its own certificate.
+
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = critical, OCSPSigning
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always
+noCheck                = ignored

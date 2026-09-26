@@ -1,0 +1,12 @@
+# Credential issuer A -- revocation checked with OCSP.
+#
+# Rendered from this template by scripts/20-issuer-certs.sh, which substitutes the
+# at-sign delimited placeholders below using values from config/domains.env.
+
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+subjectAltName         = URI:@DID@
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always
+certificatePolicies    = @POLICY_OID@
+authorityInfoAccess    = OCSP;URI:@OCSP_URL@

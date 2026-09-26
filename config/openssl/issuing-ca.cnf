@@ -1,0 +1,56 @@
+# Issuing Certificate Authority, on the server at domain2.
+#
+# Holds the certificate database that both the OCSP responder and the CRL are generated
+# from, which is why revoking a certificate here is the only action the demonstration
+# takes in order to withdraw an accreditation.
+
+[ default ]
+dir = /ca
+
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir               = $dir
+certs             = $dir/certs
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+crlnumber         = $dir/crlnumber
+private_key       = $dir/private/issuing-ca.key
+certificate       = $dir/issuing-ca.pem
+default_days      = 730
+default_crl_days  = 1
+default_md        = sha384
+policy            = policy_loose
+email_in_dn       = no
+rand_serial       = yes
+unique_subject    = no
+copy_extensions   = none
+name_opt          = ca_default
+cert_opt          = ca_default
+preserve          = no
+
+[ policy_loose ]
+countryName            = optional
+stateOrProvinceName    = optional
+localityName           = optional
+organizationName       = optional
+organizationalUnitName = optional
+commonName             = supplied
+
+[ req ]
+default_bits       = 4096
+default_md         = sha384
+prompt             = no
+string_mask        = utf8only
+distinguished_name = req_distinguished_name
+
+[ req_distinguished_name ]
+countryName         = KE
+organizationName    = Demo National PKI
+commonName          = Demo National Issuing CA
+
+# The CRL itself.
+[ crl_ext ]
+authorityKeyIdentifier = keyid:always

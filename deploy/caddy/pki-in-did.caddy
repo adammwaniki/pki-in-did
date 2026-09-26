@@ -1,0 +1,54 @@
+# PKI-in-DIDs demonstration -- public profile.
+#
+# Install:
+#     sudo cp deploy/caddy/pki-in-did.caddy /etc/caddy/pki-in-did.caddy
+#     sudo sh -c 'grep -q pki-in-did /etc/caddy/Caddyfile || echo "import /etc/caddy/pki-in-did.caddy" >> /etc/caddy/Caddyfile'
+#     sudo caddy validate --config /etc/caddy/Caddyfile
+#     sudo systemctl reload caddy
+#
+# Caddy obtains and renews Let's Encrypt certificates for the three HTTPS names by itself.
+# The four hostnames resolve directly to this server, so HTTP-01 works; no DNS credentials
+# and no wildcard certificate are needed.
+#
+# Nothing here binds port 80 or 443 on behalf of the demonstration: Caddy already owns them,
+# and the demonstration's own web servers listen only on 127.0.0.1.
+
+# domain1 -- the National Root CA's distribution point. One file: the root certificate.
+# The root private key is on an offline machine and is not on this host's network at all.
+nrca.labs.adamndegwa.com {
+	reverse_proxy 127.0.0.1:8480
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+# domain3 -- credential issuer A. Serves did.json and the certificate chain, nothing else.
+# walt.id's management API is NOT proxied: GET /issuer2/profiles returns the issuer's own
+# private key, so it stays on the internal Docker network.
+issuer-a.labs.jacarandapropaganda.com {
+	reverse_proxy 127.0.0.1:8482
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+# domain4 -- credential issuer B.
+issuer-b.labs.lawnbull.com {
+	reverse_proxy 127.0.0.1:8483
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+# domain2 -- the Issuing CA's revocation services, on plain HTTP, deliberately.
+#
+# OCSP responses and CRLs are signed objects. Serving them over TLS would make revocation
+# checking depend on revocation checking, which is why the convention is plain HTTP and why
+# the brief specifies it. `http://` here stops Caddy redirecting to HTTPS for this name.
+http://ca.labs.mwaniki.dev {
+	reverse_proxy 127.0.0.1:8481
+	header -Server
+}

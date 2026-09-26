@@ -1,0 +1,62 @@
+# National Root Certificate Authority.
+#
+# This file is used ONLY on the offline machine. The container that reads it is run with
+# `--network none` and is the only place the root private key is ever mounted.
+
+[ default ]
+dir = /offline/nrca
+
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir               = $dir
+certs             = $dir/certs
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+private_key       = $dir/private/nrca.key
+certificate       = $dir/nrca.pem
+default_days      = 3650
+default_md        = sha384
+policy            = policy_strict
+email_in_dn       = no
+rand_serial       = yes
+unique_subject    = no
+# Never honour extensions requested in a CSR: the authority decides what it certifies.
+copy_extensions   = none
+name_opt          = ca_default
+cert_opt          = ca_default
+preserve          = no
+
+[ policy_strict ]
+countryName            = match
+organizationName       = match
+organizationalUnitName = optional
+commonName             = supplied
+
+[ req ]
+default_bits       = 4096
+default_md         = sha384
+prompt             = no
+string_mask        = utf8only
+distinguished_name = req_distinguished_name
+x509_extensions    = v3_root_ca
+
+[ req_distinguished_name ]
+countryName         = KE
+organizationName    = Demo National PKI
+commonName          = Demo National Root CA
+
+# The root's own self-signed certificate.
+[ v3_root_ca ]
+basicConstraints       = critical, CA:TRUE
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+subjectKeyIdentifier   = hash
+
+# What the root certifies: exactly one Issuing CA, which may not certify another CA.
+[ v3_issuing_ca ]
+basicConstraints       = critical, CA:TRUE, pathlen:0
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always

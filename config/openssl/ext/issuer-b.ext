@@ -1,0 +1,9 @@
+# Credential issuer B -- revocation checked with a CRL.
+
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+subjectAltName         = URI:@DID@
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always
+certificatePolicies    = @POLICY_OID@
+crlDistributionPoints  = URI:@CRL_URL@

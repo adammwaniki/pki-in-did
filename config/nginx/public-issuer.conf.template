@@ -1,0 +1,36 @@
+# domain3 / domain4, public profile -- a credential issuer behind Caddy.
+#
+# Plain HTTP on the loopback interface; Caddy terminates TLS. It does NOT proxy walt.id's
+# management API: GET /issuer2/profiles returns the issuer's own private key, so that port
+# stays on the internal Docker network and is never given a public hostname.
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /srv/issuer;
+    autoindex off;
+    server_tokens off;
+
+    # did:web resolves to exactly this path.
+    location = /.well-known/did.json {
+        default_type application/did+json;
+        add_header Cache-Control 'no-cache';
+        add_header Access-Control-Allow-Origin '*';
+    }
+
+    # The x5u variant, used only to show that a chain held by reference cannot be followed
+    # when there is no network.
+    location = /.well-known/did.x5u.json {
+        default_type application/did+json;
+        add_header Access-Control-Allow-Origin '*';
+    }
+
+    location = /.well-known/pki/issuer-chain.pem {
+        default_type application/x-pem-file;
+    }
+
+    location = /healthz { return 200 "ok\n"; }
+
+    location / { return 404; }
+}

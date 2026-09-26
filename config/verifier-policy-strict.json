@@ -1,0 +1,35 @@
+{
+  "_comment": "Same as verifier-policy.json but with no clock-skew tolerance and a short freshness window, so that a cached answer going stale can be shown in under a minute. Used only by the scenes about freshness; the default policy is what the rest of the demonstration runs.",
+  "trust_anchors": [
+    "trust/nrca.pem"
+  ],
+  "_trust_anchors_note": "The National Root CA is the ONLY credential trust anchor. The Web-TLS root lives in a separate store and is never consulted for credential validation.",
+  "allow_x5u": false,
+  "_allow_x5u_note": "x5u re-introduces a network dependency. Enabled only by the x5u demonstration scene, to show it failing offline.",
+  "require_spki_jwk_binding": true,
+  "_require_spki_jwk_binding_note": "Source document tab C: without this check the certificate chain is decorative.",
+  "require_x5t_match_when_present": true,
+  "require_san_uri_equals_did": true,
+  "require_key_usage_digital_signature": true,
+  "require_assertion_method": true,
+  "require_absolute_did_urls": true,
+  "require_issuer_authorization": true,
+  "accreditation_policy_oids": {
+    "1.3.6.1.4.1.99999.1.1": [
+      "AccreditedOperatorCredential"
+    ]
+  },
+  "_require_issuer_authorization_note": "Source document tab C verifier step 5: a valid chain proves who certified the key, not what it may issue.",
+  "allowed_algs": [
+    "ES256"
+  ],
+  "_allowed_algs_note": "No 'none', no algorithm substitution.",
+  "revocation_required": true,
+  "allow_cached_revocation": true,
+  "ocsp_max_age_seconds": 30,
+  "crl_max_age_seconds": 30,
+  "clock_skew_seconds": 0,
+  "_revocation_note": "Brief verifier rule 3: reject if the revocation status is unknown or expired. Cached data is honoured only while inside its own nextUpdate, which is what creates the CRL revocation window.",
+  "http_timeout_seconds": 5,
+  "max_chain_depth": 5
+}

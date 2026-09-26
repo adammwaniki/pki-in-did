@@ -1,0 +1,15 @@
+# A TLS server certificate, from the demonstration's Web-TLS CA.
+#
+# This is the OTHER PKI layer. It exists so that did:web resolution can negotiate HTTPS.
+# It has nothing to do with credential signing, and its root is never a credential trust
+# anchor -- tests/unit/test_chain_validation.py asserts exactly that.
+
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+subjectAltName         = @alt_names
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always
+
+[ alt_names ]
+DNS.1 = @DOMAIN@

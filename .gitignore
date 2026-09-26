@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------------------
+# PKI-in-DIDs demonstration
+#
+# state/offline and state-public/offline hold National Root CA PRIVATE KEYS. They must never
+# be committed. The demonstration's own tests assert that this material appears nowhere a
+# networked container can reach; keeping it out of version control is the same rule.
+/state/
+/state-public/
+
+# Terminal recordings: large binaries, reproducible with `record/record.sh all`.
+/recordings/
