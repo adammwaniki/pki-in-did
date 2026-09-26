@@ -18,7 +18,9 @@ certificate chain is **genuine but certifies a different key** — correctly, be
 | impostor, borrowed chain | `SUCCESSFUL` | REJECTED `spki_jwk_mismatch` |
 
 That is the source document's *"the chain is decorative"*, shown against a third-party
-implementation rather than asserted.
+implementation rather than asserted. Twenty-four seconds:
+
+![Part 5 — the same credential through walt.id verifier-api2 and through the PKI policy layer](docs/media/part5-the-gap.gif)
 
 ### What is off-the-shelf, and what is not
 
@@ -192,42 +194,85 @@ what is being demonstrated.
 
 ## The recordings
 
-Six parts. **They are not in the repository** — `.gitignore` excludes `recordings/`, because
-they are ~10 MB of binaries that `record/record.sh` regenerates exactly:
+Six parts, all watchable here. The GIFs in [`docs/media/`](docs/media) are committed for
+exactly that reason; the `.cast` and `.mp4` files are not, because
+[`record/record.sh`](record/record.sh) regenerates them:
 
 ```bash
-record/record.sh all        # all six, about 12 minutes including rendering
-record/record.sh part5      # just one
+record/record.sh all          # re-record everything, ~12 minutes including rendering
+record/publish-media.sh       # re-render the GIFs below from the casts
 ```
-
-| Part | Shows | Network | Length |
-|---|---|---|---|
-| `part0-setup` | the offline machine, then the whole PKI, DID documents and credentials built | demo network | 1m40s |
-| `part1-happy-online` | `did:web` resolving, the `x5c` chain decoded, then 15 checks pass twice: A via OCSP, B via CRL | demo network | 0m20s |
-| `part2-happy-offline` | isolation proved, both credentials verified from cache, and `x5u` failing where `x5c` succeeds | `--network none` | 0m17s |
-| `part3-revocation-online` | OCSP `revoked` with the DID document's hash unchanged; then the CRL revocation window opening and closing; then an expired CRL | demo network | 0m46s |
-| `part4-revocation-offline` | what a disconnected verifier can and cannot honestly know, including a cached answer going stale | `--network none` | 2m35s |
-| **`part5-the-gap`** | **walt.id `verifier-api2` and the PKI policy layer on the same two credentials** | demo network | 0m24s |
-
-**Watch part 5 first.** It is the argument in 24 seconds: a genuine national certificate chain
-beside a key it does not certify, accepted by a production verifier and rejected by the policy
-layer. The other five earn their keep once you have seen why `x5c` needs validating at all.
-
-Each part produces three files in `recordings/`:
-
-| Extension | Use |
-|---|---|
-| `.mp4` | the video |
-| `.gif` | drops into slides and READMEs |
-| `.cast` | exact, tiny, replayable, and copy-pasteable as text — `asciinema play recordings/part5-the-gap.cast` |
-
-`asciinema`, `agg` and `ffmpeg` all live in the `recorder` image, so the host needs nothing
-installed. Terminal size is fixed at 104x34 so the reports lay out the same way every time.
 
 The narration is **in the scripts** (`narrate "..."`), printed in quotes as it comes up, so what
 is said and what is run cannot drift apart. [`record/RECORDING.md`](record/RECORDING.md) is the
-shot list: what to point at in each part, the lines to say aloud, and how to put the stack back
-between takes (`scripts/90-restore-revocations.sh`, ~25 s — not a full reset).
+shot list: what to point at, the lines to say aloud, and how to reset between takes
+(`scripts/90-restore-revocations.sh`, ~25 s, rather than a full rebuild).
+
+---
+
+### Part 1 — the happy path, online · 20s
+
+`did:web` resolving by textual rule, the `x5c` chain decoded into certificate names rather than
+kilobytes of base64, then fifteen checks passing twice: issuer A via OCSP `good`, issuer B with
+its serial absent from the CRL.
+
+![Part 1](docs/media/part1-happy-online.gif)
+
+### Part 2 — the happy path with no network · 17s
+
+Opens by *proving* the isolation rather than claiming it: nothing resolves, and `/proc/net/route`
+holds nothing but `lo`. Both credentials verify anyway. Closes with the three lines that show why
+— `x5c` by value against `x5u` by reference.
+
+![Part 2](docs/media/part2-happy-offline.gif)
+
+### Part 3 — revocation, online · 46s
+
+The Issuing CA acts alone, twice. OCSP first: the DID document's hash is printed before and
+after, identical. Then the CRL, where the verifier **accepts and is right to** until a new CRL is
+published — that gap is the revocation window. Finally an expired CRL, rejected *for being
+expired* even though it lists the serial.
+
+![Part 3](docs/media/part3-revocation-online.gif)
+
+### Part 4 — revocation, offline · 2m35s
+
+What a disconnected verifier can and cannot honestly know. It still accepts, because it has not
+been told and cannot ask; refuse the cached answer and it reports `unknown`; one reconnection
+makes the rejection persist. Ends with a cached answer going stale under a narrower policy while
+the default still accepts the same cache.
+
+![Part 4](docs/media/part4-revocation-offline.gif)
+
+### Part 5 — what a conformant verifier does not check · 24s
+
+**The argument.** walt.id `verifier-api2` and the PKI policy layer on the same two credentials.
+If you watch one, watch this.
+
+![Part 5](docs/media/part5-the-gap.gif)
+
+### Part 0 — building it · 1m40s, shown at 3x
+
+<details>
+<summary>The offline machine, then the whole PKI, the DID documents and OpenID4VCI issuance</summary>
+
+The root key directory and the container's interface count come first, because where the root
+private key lives is the thing a viewer needs to see before anything else. Then the CSR crossing
+to the offline machine and the certificate coming back, the Web-TLS CA, the two issuer
+certificates with their different revocation pointers, the walt.id profiles, the DID documents,
+the CRL, issuance, and the laptop's trust store.
+
+![Part 0](docs/media/part0-setup.gif)
+
+</details>
+
+---
+
+Each recording also produces an `.mp4` and a `.cast` in `recordings/`. The `.cast` is the most
+useful of the three: exact, a few kilobytes, replayable and copy-pasteable as text —
+`asciinema play recordings/part5-the-gap.cast`. `asciinema`, `agg` and `ffmpeg` all live in the
+`recorder` image, so the host needs nothing installed, and the terminal is fixed at 104x34 so
+the reports lay out identically every time.
 
 Run any part by hand for a live audience and it pauses between scenes:
 
@@ -270,14 +315,13 @@ Two smaller ones worth stating plainly:
 
 ### Why it is self-contained
 
-Measured on this host on 2026-09-26:
+Two things about the host this was built on:
 
-- **Ports 80 and 443 are held by Caddy**, fronting an existing multi-container stack. The
-  demonstration must not take them, and does not bind any host port.
-- **The four domains resolve to Cloudflare edge IPs**, not to this server. Only
-  `adamndegwa.com` has an origin block in `/etc/caddy/Caddyfile`; all four currently serve
-  unrelated content. Public Let's Encrypt certificates for all four, as brief step 10 assumes,
-  is not the current state of the world.
+- **Ports 80 and 443 belong to another service**, so the demonstration must not take them, and
+  it binds no host port at all.
+- **The four bare domains are proxied and already serve unrelated content**, so they cannot
+  resolve to this stack. Public certificates for them, as brief step 10 assumes, is not the
+  current state of the world.
 
 So the stack uses those exact domain names as Docker-network aliases with its own Web-TLS CA.
 This is not a compromise: it is what makes the run reproducible, `--network none` meaningful,
@@ -297,8 +341,9 @@ scripts/                 the build, in the order the brief describes
 demo/                    the four recorded parts, with their narration
 tests/unit/              180 hermetic tests: every reject path, no Docker, no network
 tests/integration/       66 tests against the live stack, including --network none
-record/                  record.sh · RECORDING.md (shot list, narration) · NOTES-waltid.md
-recordings/              generated by record/record.sh; not in the repository
+record/                  record.sh · publish-media.sh · RECORDING.md · NOTES-waltid.md
+docs/media/              the GIFs embedded above; committed so the README plays
+recordings/              .cast and .mp4, generated by record/record.sh; not committed
 state/                   generated; state/offline holds the root key and is mounted nowhere else
 ```
 

@@ -51,10 +51,10 @@ Verified on this host on 2026-09-26:
 - **Ports 80 and 443 are held by Caddy**, fronting an existing multi-container VCA stack
   (`admin-*`, `verifier-*`, `inji-*`). The demonstration must not bind them, and binds no host
   port at all.
-- **The four domains resolve to Cloudflare edge IPs** (`104.21.x`, `172.67.x`), not to this
-  server. Only `adamndegwa.com` has an origin block in `/etc/caddy/Caddyfile`; all four
-  currently serve unrelated content. Public Let's Encrypt certificates for all four, as brief
-  step 10 assumes, is not the current state of the world.
+- **The four bare domains are proxied and already serve unrelated content**, so they cannot
+  resolve to this stack. Public Let's Encrypt certificates for all four, as brief step 10
+  assumes, is not the current state of the world. The `labs.*` names used by the public profile
+  do resolve here directly, which is what makes that profile possible.
 - No `asciinema`, `agg`, `ffmpeg` or `certbot` on the host. Recording tooling ships in a
   container.
 - Docker 29.8.1 and Compose v5.5.1 on the host. The host's own OpenSSL is not used: every CA
@@ -650,7 +650,6 @@ The reusable lessons, each fixed in the code named:
 
 The brief's step 10 assumes public Let's Encrypt certificates on `adamndegwa.com`,
 `jacarandapropaganda.com` and `lawnbull.com`. Those names are Cloudflare-proxied and serve
-unrelated content, and only `adamndegwa.com` has an origin block on this host. The
-self-contained stack is what is recorded. A public overlay through the existing Caddy would
+unrelated content. The self-contained stack is what is recorded. A public overlay through the existing Caddy would
 need Cloudflare set to DNS-only, or Full-strict with origin certificates, for those hostnames;
 it has not been built.
