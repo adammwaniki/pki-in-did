@@ -36,7 +36,7 @@ scene "The credential, as walt.id issuer-api2 issued it" \
       "Its kid is the absolute DID URL of that verification method."
 docker run --rm --network none -u "$(id -u):$(id -g)" \
   -v "$STATE:/state:ro" -e PYTHONPATH=/app/src --entrypoint python "$VERIFIER_IMAGE" \
-  -m verifier.cli inspect --credential /state/credentials/issuer-a-vc-jose.jwt \
+  -m did_x509_policy.cli inspect --credential /state/credentials/issuer-a-vc-jose.jwt \
   | jq '{typ: .header.typ, alg: .header.alg, kid: .header.kid,
          x5cInHeader: (.header.x5c | length), issuer, types}'
 narrate "The kid in the credential and the verification method id in the DID document are the same string."

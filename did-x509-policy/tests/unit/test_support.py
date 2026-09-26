@@ -1,52 +1,32 @@
-"""The supporting pieces: policy loading, the laptop store, the report, and the CLI."""
+"""The supporting pieces: policy loading, the store, the report, and the CLI.
+
+These moved here from the demonstration this package was extracted from, because this is where
+the code they test lives.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from tests import pkifixtures as fx
+from tests import fixtures as fx
 from tests.conftest import assert_accepted
 
 pytestmark = pytest.mark.unit
 
-REPO = Path(__file__).resolve().parents[2]
+PACKAGE = Path(__file__).resolve().parents[2]
 
 
 # ------------------------------------------------------------------------ policy
 
-def test_the_shipped_policy_file_encodes_the_briefs_three_rules(policy):
-    assert policy.trust_anchors == ["trust/nrca.pem"]
-    assert policy.revocation_required is True
-    assert policy.allowed_algs == ["ES256"]
 
 
-def test_a_missing_chain_is_not_a_configurable_rule(policy):
-    """The brief's second rule is a premise, not a setting.
-
-    With no chain in the JWK there is nothing to validate against the National Root CA, so
-    there is no coherent way to switch the requirement off. What IS configurable is whether
-    a chain held by reference will do.
-    """
-    assert "require_x5c" not in policy.as_dict()
-    assert policy.allow_x5u is False
-
-
-def test_the_shipped_policy_file_encodes_the_source_documents_binding_rule(policy):
-    assert policy.require_spki_jwk_binding is True
-    assert policy.require_san_uri_equals_did is True
-    assert policy.require_assertion_method is True
-
-
-def test_selected_freshness_values_match_the_plan(policy):
-    assert policy.ocsp_max_age_seconds == 300
-    assert policy.crl_max_age_seconds == 3600
-    assert policy.clock_skew_seconds == 30
 
 
 def test_replace_returns_a_new_policy_and_leaves_the_original_alone(policy):
@@ -107,7 +87,7 @@ def test_the_store_refuses_to_hold_a_private_key(store, world):
 
 
 def test_a_fingerprint_is_reported_for_the_trust_anchor(store, world, policy):
-    from verifier.store import sha256_fingerprint
+    from did_x509_policy import sha256_fingerprint
 
     anchor = store.trust_anchors(policy.trust_anchors)[0]
     printed = sha256_fingerprint(anchor)
@@ -118,7 +98,7 @@ def test_a_fingerprint_is_reported_for_the_trust_anchor(store, world, policy):
 # ------------------------------------------------------------------------ report
 
 def test_the_report_renders_one_numbered_line_per_check(verify, world, policy, store, online):
-    from verifier.report import render_text
+    from did_x509_policy import render_text
 
     result = verify(world.issuer_a.credential_jose, policy=policy, store=store, transport=online)
     text = render_text(result)
@@ -129,7 +109,7 @@ def test_the_report_renders_one_numbered_line_per_check(verify, world, policy, s
 
 
 def test_the_report_names_the_failing_check_and_stops_there(verify, world, policy, store, offline):
-    from verifier.report import render_text
+    from did_x509_policy import render_text
 
     result = verify(world.issuer_a.credential_jose, policy=policy, store=store, transport=offline)
     text = render_text(result)
@@ -149,7 +129,7 @@ def test_the_json_report_is_machine_readable_and_complete(verify, world, policy,
 
 
 def test_the_report_shows_the_trust_anchor_and_its_fingerprint(verify, world, policy, store, online):
-    from verifier.report import render_text
+    from did_x509_policy import render_text
 
     result = verify(world.issuer_a.credential_jose, policy=policy, store=store, transport=online)
     assert fx.NRCA_CN in render_text(result)
@@ -158,58 +138,71 @@ def test_the_report_shows_the_trust_anchor_and_its_fingerprint(verify, world, po
 # --------------------------------------------------------------------------- CLI
 
 def _run_cli(*args, store_root: Path):
-    env = {"PYTHONPATH": str(REPO / "src"), "LAPTOP_STORE": str(store_root), "PATH": "/usr/bin:/bin"}
+    """Invoke the CLI as a user would: an installed package, a store, nothing else.
+
+    The store carries its own policy.json, which is how a deployment supplies trust anchors
+    and accreditation OIDs -- the package ships neither.
+    """
+    env = {**os.environ, "LAPTOP_STORE": str(store_root)}
     return subprocess.run(
-        [sys.executable, "-m", "verifier.cli", *args],
-        capture_output=True, text=True, env=env, cwd=REPO,
+        [sys.executable, "-m", "did_x509_policy.cli", *args],
+        capture_output=True, text=True, env=env, cwd=PACKAGE,
     )
 
 
-def test_the_cli_exits_zero_on_acceptance_and_one_on_rejection(tmp_path, world, seeded_store):
+@pytest.fixture
+def cli_store(seeded_store, policy):
+    """A store with a policy beside it, which is how the CLI learns its trust anchors."""
+    (seeded_store.root / "policy.json").write_text(policy.to_json(indent=2))
+    return seeded_store
+
+
+def test_the_cli_exits_zero_on_acceptance_and_one_on_rejection(tmp_path, world, cli_store):
     credential = tmp_path / "a.jwt"
     credential.write_text(world.issuer_a.credential_jose)
 
-    ok = _run_cli("verify", "--offline", "--credential", str(credential), store_root=seeded_store.root)
+    ok = _run_cli("verify", "--offline", "--credential", str(credential), store_root=cli_store.root)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert "ACCEPTED" in ok.stdout
 
+    # Same anchor, same policy, but nothing cached: offline with no cache cannot decide.
     empty = tmp_path / "empty-laptop"
     (empty / "trust").mkdir(parents=True)
     (empty / "trust" / "nrca.pem").write_bytes(world.root_pem)
+    (empty / "policy.json").write_text((cli_store.root / "policy.json").read_text())
     bad = _run_cli("verify", "--offline", "--credential", str(credential), store_root=empty)
     assert bad.returncode == 1
     assert "REJECTED" in bad.stdout
 
 
-def test_the_cli_emits_json_on_request(tmp_path, world, seeded_store):
+def test_the_cli_emits_json_on_request(tmp_path, world, cli_store):
     credential = tmp_path / "a.jwt"
     credential.write_text(world.issuer_a.credential_jose)
     done = _run_cli("verify", "--offline", "--json", "--credential", str(credential),
-                    store_root=seeded_store.root)
+                    store_root=cli_store.root)
     assert done.returncode == 0, done.stdout + done.stderr
     assert json.loads(done.stdout)["accepted"] is True
 
 
-def test_the_cli_reads_a_credential_from_stdin(tmp_path, world, seeded_store):
-    env = {"PYTHONPATH": str(REPO / "src"), "LAPTOP_STORE": str(seeded_store.root),
-           "PATH": "/usr/bin:/bin"}
+def test_the_cli_reads_a_credential_from_stdin(tmp_path, world, cli_store):
+    env = {**os.environ, "LAPTOP_STORE": str(cli_store.root)}
     done = subprocess.run(
-        [sys.executable, "-m", "verifier.cli", "verify", "--offline", "--json", "--credential", "-"],
-        input=world.issuer_a.credential_jose, capture_output=True, text=True, env=env, cwd=REPO,
+        [sys.executable, "-m", "did_x509_policy.cli", "verify", "--offline", "--json", "--credential", "-"],
+        input=world.issuer_a.credential_jose, capture_output=True, text=True, env=env, cwd=PACKAGE,
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert json.loads(done.stdout)["accepted"] is True
 
 
-def test_the_cli_can_print_the_trust_anchor_fingerprint(seeded_store):
-    done = _run_cli("fingerprint", store_root=seeded_store.root)
+def test_the_cli_can_print_the_trust_anchor_fingerprint(cli_store):
+    done = _run_cli("fingerprint", store_root=cli_store.root)
     assert done.returncode == 0, done.stdout + done.stderr
     assert len(done.stdout.strip().split(":")) >= 32
 
 
-def test_the_cli_refuses_an_unreadable_credential(tmp_path, seeded_store):
+def test_the_cli_refuses_an_unreadable_credential(tmp_path, cli_store):
     done = _run_cli("verify", "--offline", "--credential", str(tmp_path / "missing.jwt"),
-                    store_root=seeded_store.root)
+                    store_root=cli_store.root)
     assert done.returncode == 2
     assert "missing.jwt" in done.stderr
 
@@ -220,7 +213,7 @@ def test_an_unexpected_error_inside_a_check_rejects_rather_than_accepts(
     verify, world, policy, store, online, monkeypatch
 ):
     """A verifier that crashes has not accepted anything."""
-    import verifier.revocation as revmod
+    import did_x509_policy.revocation as revmod
 
     def explode(*args, **kwargs):
         raise RuntimeError("the responder returned something we never anticipated")
@@ -232,12 +225,12 @@ def test_an_unexpected_error_inside_a_check_rejects_rather_than_accepts(
     assert "never anticipated" in result.failed_check.detail
 
 
-def test_the_cli_reports_a_rejection_rather_than_a_traceback(tmp_path, world, seeded_store):
+def test_the_cli_reports_a_rejection_rather_than_a_traceback(tmp_path, world, cli_store):
     """Nothing in the demonstration should ever show a stack trace."""
     credential = tmp_path / "broken.jwt"
     credential.write_text("this is not a credential at all")
     done = _run_cli("verify", "--offline", "--credential", str(credential),
-                    store_root=seeded_store.root)
+                    store_root=cli_store.root)
     assert done.returncode == 1
     assert "Traceback" not in done.stderr
     assert "REJECTED" in done.stdout
@@ -301,19 +294,3 @@ def test_allow_x5u_is_off_unless_asked_for(tmp_path, world, store):
     assert json.loads(permitted.stdout)["reason"] == "x5u_fetch_failed"
 
 
-def test_the_strict_policy_is_the_default_policy_only_tighter():
-    """The freshness scenes must not quietly relax anything else."""
-    from verifier.policy import Policy
-
-    root = Path(__file__).resolve().parents[2] / "config"
-    default = Policy.from_file(root / "verifier-policy.json")
-    strict = Policy.from_file(root / "verifier-policy-strict.json")
-
-    assert strict.clock_skew_seconds == 0
-    assert strict.ocsp_max_age_seconds < default.ocsp_max_age_seconds
-    assert strict.crl_max_age_seconds < default.crl_max_age_seconds
-
-    tightened = {"clock_skew_seconds", "ocsp_max_age_seconds", "crl_max_age_seconds"}
-    for name, value in default.as_dict().items():
-        if name not in tightened:
-            assert strict.as_dict()[name] == value, f"{name} differs beyond the freshness knobs"

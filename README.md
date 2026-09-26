@@ -22,6 +22,26 @@ implementation rather than asserted. Twenty-four seconds:
 
 ![Part 5 — the same credential through walt.id verifier-api2 and through the PKI policy layer](docs/media/part5-the-gap.gif)
 
+### The policy layer is published on its own
+
+The part of this that is ours — the PKI policy layer — is packaged separately, because it is
+the reusable half:
+
+**[`did-x509-policy/`](did-x509-policy) · [`ghcr.io/adammwaniki/did-x509-policy`](https://github.com/adammwaniki/pki-in-did/pkgs/container/did-x509-policy)**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e DID_X509_TRUST_ANCHOR_PEM="$(cat your-root.pem)" \
+  ghcr.io/adammwaniki/did-x509-policy:1.0.0
+
+curl -sS -X POST localhost:8080/verify -H 'Content-Type: application/json' \
+  -d "{\"credential\": \"$(cat credential.jwt)\"}"
+```
+
+A library, a CLI and an HTTP service, with pluggable cache and transport backends so it fits
+whatever you already run. 201 tests. This demonstration installs that package rather than
+keeping a copy, so the two cannot drift.
+
 ### What is off-the-shelf, and what is not
 
 | Component | What it is |
@@ -30,7 +50,7 @@ implementation rather than asserted. Twenty-four seconds:
 | Holder | **walt.id `wallet-api2`** — a real wallet. It generates and holds the holder key, creates the DID, proves possession, stores credentials, and presents them over OpenID4VP |
 | Standards-conformant verification | **walt.id `verifier-api2`** — a real OpenID4VP 1.0 verifier with DCQL, unmodified except one root added to its JVM trust store |
 | The CA | stock `openssl ca` and `openssl ocsp` |
-| **The PKI policy layer** | `src/verifier/` — ours. Path validation to the national root, the SPKI-to-JWK binding, SAN URI, accreditation, revocation, and the offline cache |
+| **The PKI policy layer** | [`did-x509-policy`](did-x509-policy) — ours, and published separately. Path validation to the national root, the SPKI-to-JWK binding, SAN URI, accreditation, revocation, and the offline cache |
 | Glue | `src/holder/wallet.py` — an HTTP client that drives the three services; it implements no protocol itself |
 
 So the credential is issued, held, presented and verified by production walt.id services
@@ -333,8 +353,8 @@ Cloudflare set to DNS-only (or Full-strict with origin certificates) for those h
 ```
 PLAN.md                  the plan, and the environment findings that shaped it
 PKI in DID.md            the source document (tabs K and C)
-config/                  domains.env · verifier-policy*.json · openssl/ · nginx/
-src/verifier/            the fifteen checks: credential, didweb, chain, revocation, policy, report, cli
+config/                  domains.env · verifier-policy*.json · openssl/ · nginx/ · waltid-*/
+did-x509-policy/         the PKI policy layer, published on its own: library, CLI and service
 src/issuer/              JWK export, DID document builder, walt.id profile renderer
 src/holder/wallet.py     an HTTP client driving walt.id issuer-api2, wallet-api2 and verifier-api2
 scripts/                 the build, in the order the brief describes

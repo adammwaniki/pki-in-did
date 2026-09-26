@@ -38,7 +38,7 @@ step "The key identifier and issuer inside each credential"
 for which in a b; do
   docker run --rm --network none -u "$(id -u):$(id -g)" \
     -v "$REPO:/app" -w /app -e PYTHONPATH=/app/src \
-    --entrypoint python "$VERIFIER_IMAGE" -m verifier.cli inspect \
+    --entrypoint python "$VERIFIER_IMAGE" -m did_x509_policy.cli inspect \
       --credential "state/credentials/issuer-$which-vc-jose.jwt" \
     | jq -r '"      issuer  \(.issuer)\n      kid     \(.header.kid)\n      typ     \(.header.typ)   alg \(.header.alg)   x5c \(.header.x5c | length) cert(s)\n      type    \(.types | join(", "))"'
 done

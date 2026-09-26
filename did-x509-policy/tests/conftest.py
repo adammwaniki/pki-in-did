@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from . import pkifixtures as fx
+from . import fixtures as fx
 
 UTC = dt.timezone.utc
 
@@ -29,7 +29,7 @@ UTC = dt.timezone.utc
 # ------------------------------------------------------------------- transports
 
 class NetworkUnavailable(Exception):
-    """Raised by a transport that has no network. Mirrors verifier.transport."""
+    """Raised by a transport with no network. Mirrors did_x509_policy.transport."""
 
 
 class FakeTransport:
@@ -97,9 +97,20 @@ def world() -> fx.DemoWorld:
 
 @pytest.fixture
 def policy():
+    """The shipped default, plus the two things a deployment must supply itself.
+
+    `trust_anchors` names where a FileStore looks for them; `accreditation_policy_oids` maps a
+    certificate policy OID to the credential types it accredits. The package ships neither, on
+    purpose -- only an ecosystem can define them, and a verifier with no anchor should reject
+    everything rather than appear configured.
+    """
     from did_x509_policy import Policy
 
-    return Policy.from_file(Path(__file__).resolve().parents[1] / "config" / "verifier-policy.json")
+    return Policy.default().replace(
+        trust_anchors=["trust/nrca.pem"],
+        require_issuer_authorization=True,
+        accreditation_policy_oids={fx.ACCREDITATION_POLICY_OID: [fx.ACCREDITED_TYPE]},
+    )
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ import copy
 
 import pytest
 
-from tests import pkifixtures as fx
+from tests import fixtures as fx
 from tests.conftest import assert_accepted, assert_rejected
 
 pytestmark = pytest.mark.unit

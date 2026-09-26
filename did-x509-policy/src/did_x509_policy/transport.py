@@ -6,6 +6,28 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class Transport(Protocol):
+    """How the verifier reaches the network. Implement this for any client you prefer.
+
+    `offline` tells the verifier not to expect a network at all, which changes what it says
+    when data is missing: "could not be fetched" rather than "unreachable". Both are
+    rejections; only the wording differs.
+
+    Any exception raised is treated as "no answer" -- the verifier never distinguishes a
+    refused connection from a timeout from a 500, because the decision is the same.
+    """
+
+    offline: bool
+
+    def get(self, url: str, *, timeout: float | None = None) -> bytes: ...
+
+    def post(self, url: str, body: bytes, *, content_type: str,
+             timeout: float | None = None) -> bytes: ...
+
 
 class NetworkUnavailable(Exception):
     """No answer from the network: unreachable, refused, timed out, or no network at all."""
