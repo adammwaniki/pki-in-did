@@ -365,7 +365,7 @@ config/            domains.env · verifier-policy.json · verifier-policy-strict
 images/            ca-tools (Alpine 3.22, OpenSSL 3.5.8) · web (nginx) · verifier (python:3.12)
                    tester (verifier deps + docker-cli + compose plugin) · recorder (tester + asciinema, agg, ffmpeg)
                    offline-ca/README.md — no image; ca-tools run with --network none
-did-x509-policy/   the policy layer, extracted and published: library, CLI, HTTP service
+(the policy layer is its own repository now: adammwaniki/did-x509-policy)
 src/ca/            revocation_service.py
 src/issuer/        jwkexport.py · build_did_document.py · render_profile.py
 src/holder/        wallet.py

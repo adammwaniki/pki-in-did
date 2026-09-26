@@ -4,18 +4,18 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates openssl curl dnsutils jq \
+ && apt-get install -y --no-install-recommends ca-certificates openssl curl dnsutils jq git \
  && rm -rf /var/lib/apt/lists/*
 
 COPY images/verifier/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# The policy layer is the did-x509-policy package, installed from this repository rather than
-# vendored. The demonstration and the published package are therefore the same code: there is
-# no second copy to drift.
-COPY did-x509-policy/ /tmp/did-x509-policy/
-RUN pip install --no-cache-dir '/tmp/did-x509-policy[http,service]' \
- && rm -rf /tmp/did-x509-policy
+# The policy layer is did-x509-policy, which lives in its own repository and is pinned here by
+# tag. The demonstration therefore exercises exactly the released code, and there is no second
+# copy to drift. Bump DID_X509_POLICY_VERSION to move.
+ARG DID_X509_POLICY_VERSION=v1.0.1
+RUN pip install --no-cache-dir \
+      "did-x509-policy[http,service] @ git+https://github.com/adammwaniki/did-x509-policy@${DID_X509_POLICY_VERSION}"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
