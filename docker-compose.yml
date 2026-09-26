@@ -127,11 +127,13 @@ services:
       demo:
         aliases: [ "issuer-a-api" ]
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7005"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
+      # The images carry curl; /bin/sh here is dash, which has no /dev/tcp.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "4",
+             "http://127.0.0.1:7005/.well-known/openid-credential-issuer/openid4vci"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
     <<: *logging
 
   # Credential issuer B's issuance service.
@@ -145,11 +147,13 @@ services:
       demo:
         aliases: [ "issuer-b-api" ]
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7005"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
+      # The images carry curl; /bin/sh here is dash, which has no /dev/tcp.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "4",
+             "http://127.0.0.1:7005/.well-known/openid-credential-issuer/openid4vci"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
     <<: *logging
 
   # The holder: walt.id wallet-api2. It generates and holds the holder key, creates the DID,
@@ -166,11 +170,12 @@ services:
       demo:
         aliases: [ "wallet-api" ]
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7006"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "4",
+             "http://127.0.0.1:7006/wallet"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
     <<: *logging
 
   # The impostor. Serves one DID document, whose JWK carries a genuine national certificate
@@ -216,11 +221,12 @@ services:
       demo:
         aliases: [ "verifier-api" ]
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7004"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "4",
+             "http://127.0.0.1:7004/api.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
     <<: *logging
 
 networks:
