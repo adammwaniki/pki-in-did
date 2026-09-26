@@ -1,5 +1,10 @@
 # PKI in Decentralised Identifiers — a working demonstration
 
+> **Arrived from the `did-x509-policy` package?** Its own documentation is in
+> **[`did-x509-policy/README.md`](did-x509-policy/README.md)** — install, configure, endpoints,
+> backends and limitations. GitHub Packages shows this repository's README, not the package's.
+> What follows is the demonstration the package was extracted from.
+
 A `did:web` issuer publishes a signing key that a **National Root CA** certified, issues a
 Verifiable Credential with it over **OpenID4VCI**, and a verifier whose only trust anchor is
 that root certificate decides accept or reject — **with or without a network**.
@@ -54,8 +59,8 @@ keeping a copy, so the two cannot drift.
 | Glue | `src/holder/wallet.py` — an HTTP client that drives the three services; it implements no protocol itself |
 
 So the credential is issued, held, presented and verified by production walt.id services
-throughout. The only code of ours in the trust decision is `src/verifier/`, and it is
-deliberately **not** a reimplementation of a credential verifier: it is the policy layer the
+throughout. The only code of ours in the trust decision is [`did-x509-policy`](did-x509-policy), and it
+is deliberately **not** a reimplementation of a credential verifier: it is the policy layer the
 specifications say you must add and do not define. That is why the demonstration runs both.
 
 ```

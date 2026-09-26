@@ -267,6 +267,6 @@ The wallet uses **DPoP-bound access tokens** against the issuer, which `issuer-a
 ## What this changes about the demonstration
 
 The credential is issued, held, presented and verified by production walt.id services
-throughout. The only code of ours inside the trust decision is `src/verifier/`, the PKI policy
+throughout. The only code of ours inside the trust decision is `did-x509-policy/`, the PKI policy
 layer — and part 5 shows it disagreeing with `verifier-api2` exactly where the source document
 says it must.

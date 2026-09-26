@@ -221,7 +221,7 @@ URDNA2015, because the demonstration carries no JSON-LD processor.
 
 ## 8. The verifier
 
-`src/verifier/verify.py` runs fifteen checks in a fixed order and stops at the first failure.
+`did-x509-policy`'s `verify.py` runs fifteen checks in a fixed order and stops at the first failure.
 Checks 1–6 and 10 come from DID Core and the `did:web` Read algorithm. The rest are verifier
 policy: a conformant resolver treats `x5c` as opaque metadata, and that gap is the point.
 
@@ -271,7 +271,7 @@ A check that raises an unexpected exception fails closed with reason `verifier_e
 
 ### Reason codes
 
-`src/verifier/reasons.py` defines 44 stable reason strings. They are the verifier's public
+`did-x509-policy`'s `reasons.py` defines the stable reason strings. They are the verifier's public
 contract: the tests assert on them, the demo scripts print them, and `--json` emits them.
 
 ### Policy
@@ -311,7 +311,7 @@ three settings. `scripts/70-fingerprint.sh` installs both on the laptop.
 
 ## 9. The laptop store
 
-`src/verifier/store.py`, rooted at `/laptop` in the container (`state/laptop/` on the host):
+`did-x509-policy`'s `FileStore`, rooted at `/laptop` in the container (`state/laptop/` on the host):
 
 ```
 trust/nrca.pem            the National Root CA, the only credential trust anchor
@@ -365,7 +365,7 @@ config/            domains.env · verifier-policy.json · verifier-policy-strict
 images/            ca-tools (Alpine 3.22, OpenSSL 3.5.8) · web (nginx) · verifier (python:3.12)
                    tester (verifier deps + docker-cli + compose plugin) · recorder (tester + asciinema, agg, ffmpeg)
                    offline-ca/README.md — no image; ca-tools run with --network none
-src/verifier/      cli · verify · credential · jose · didweb · chain · revocation · policy · store · transport · report · reasons
+did-x509-policy/   the policy layer, extracted and published: library, CLI, HTTP service
 src/ca/            revocation_service.py
 src/issuer/        jwkexport.py · build_did_document.py · render_profile.py
 src/holder/        wallet.py
@@ -548,7 +548,7 @@ OpenID4VCI and OpenID4VP implementation of about the same size, which was the ri
 the same reason: a demonstration about interoperability should not depend on our reading of
 the specifications.
 
-`src/verifier/` is therefore not a credential verifier and should not be read as one. It is the
+`did-x509-policy` is therefore not a credential verifier and should not be read as one. It is the
 **PKI policy layer**: path validation to the national root, the SPKI-to-JWK binding, the SAN
 URI rule, accreditation, revocation, and the offline cache. Those are the checks the
 specifications require someone to add and do not define.
@@ -594,10 +594,10 @@ These departures are recorded here because no other file records them.
 | cache files `cache/ocsp/<ca>-<serial>.der`, `cache/crl/<ca>.crl` | JSON wrappers with base64 DER and a `storedAt` stamp, keyed by digest |
 | seven policy settings | eighteen. `require_x5c` was declared but read by nothing, and was in any case `allow_x5u` inverted, so it has been removed: a JWK with no chain is rejected unconditionally, because with no chain there is nothing to validate. |
 | `demo/part0-setup` | as planned, and it runs `10-offline-root.sh` first so the offline machine is on camera |
-| all verification done by our own code | walt.id `verifier-api2` does the conformant half; `src/verifier` is the PKI policy layer. See section 16a -- this was the plan's most substantive weakness. |
+| all verification done by our own code | walt.id `verifier-api2` does the conformant half; `did-x509-policy` is the PKI policy layer. See section 16a -- this was the plan's most substantive weakness. |
 | our own holder client | walt.id `wallet-api2`. The hand-rolled OpenID4VCI/OpenID4VP client is gone; `src/holder/wallet.py` is now an HTTP client of three real services. |
 | reason code `privilegeWithdrawn` | `cessationOfOperation`, which stock `openssl ca` can express, so brief steps 16 and 18 are literal. `REVOCATION_REASON` changes it. The bespoke responder that could emit `privilegeWithdrawn` was removed once that trade was accepted. |
-| `src/verifier/cache`, `src/issuer/export_issuer_jwk.py`, `scripts/25-waltid-profiles` | `store.py`, `jwkexport.py`, `25-waltid-config.sh` |
+| `src/verifier/cache`, `src/issuer/export_issuer_jwk.py`, `scripts/25-waltid-profiles` | the policy layer became the `did-x509-policy` package; `jwkexport.py`; `25-waltid-config.sh` |
 | an `offline-ca` image and a `verifier` service | neither; both are `docker run` invocations |
 | two credentials per issuer | one; see section 7 |
 | part 4 ends with an expired cache rejecting as `unknown` | it rejects as `revocation_expired` or `revocation_stale` under the strict policy |
