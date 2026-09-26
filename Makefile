@@ -38,7 +38,7 @@ setup: images
 	scripts/25-waltid-config.sh
 	scripts/30-did-documents.sh
 	scripts/50-publish-crl.sh
-	$(COMPOSE) up -d
+	scripts/98-compose-up.sh
 	scripts/40-issue-credentials.sh
 	scripts/70-fingerprint.sh
 	scripts/80-seed-offline-cache.sh
@@ -80,6 +80,7 @@ demo:
 	demo/part2-happy-offline.sh
 	demo/part3-revocation-online.sh
 	demo/part4-revocation-offline.sh
+	demo/part5-the-gap.sh
 
 ## reset       reissue every certificate and credential (the root is kept)
 .PHONY: reset

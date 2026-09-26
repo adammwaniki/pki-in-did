@@ -94,12 +94,22 @@ def test_the_crl_revocation_window_then_its_closure(fresh_stack):
     assert after["revocation"]["reason"] == REVOCATION_REASON
 
 
-def test_an_expired_crl_is_rejected_even_though_it_lists_nothing(fresh_stack):
-    """Part 3 optional step 5."""
+def test_an_expired_crl_is_rejected(fresh_stack):
+    """Part 3 optional step 5.
+
+    `openssl ca -gencrl` can only date a CRL from now, so expire-crl.sh gives it a short life
+    and waits it out. The wait cannot also outrun the default policy's 30-second clock-skew
+    tolerance in a sensible time, so the strict policy -- whose tolerance is zero -- is what
+    this is verified with.
+    """
     script("expire-crl.sh")
-    result = verify_json("issuer-b-vc-jose.jwt")
-    assert result["accepted"] is False
-    assert result["reason"] == "revocation_expired"
+    strict = verify_json("issuer-b-vc-jose.jwt", policy="/laptop/policy-strict.json")
+    assert strict["accepted"] is False
+    assert strict["reason"] in ("revocation_expired", "revocation_stale")
+
+    # Under the default tolerance the same CRL is still inside the allowance, which is the
+    # point of having a tolerance at all.
+    assert verify_json("issuer-b-vc-jose.jwt")["accepted"] is True
 
 
 def test_offline_learns_of_an_ocsp_revocation_only_after_the_cache_is_refreshed(fresh_stack):

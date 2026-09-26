@@ -24,7 +24,7 @@ else
   run ca chmod 400 /tls/private/webtls-root.key
 fi
 
-for domain in "$NRCA_DOMAIN" "$ISSUER_A_DOMAIN" "$ISSUER_B_DOMAIN"; do
+for domain in "$NRCA_DOMAIN" "$ISSUER_A_DOMAIN" "$ISSUER_B_DOMAIN" "$IMPOSTOR_DOMAIN"; do
   if [[ -f "$STATE/tls/certs/$domain.pem" ]]; then
     note "$domain already has a TLS certificate"
     continue

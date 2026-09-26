@@ -64,6 +64,18 @@ services:
     volumes:
       - ./state-public/waltid/issuer-b:/waltid-issuer-api2/config:ro
 
+  # On the public profile the issuer hostnames carry real Let's Encrypt certificates, so the
+  # stock trust store is enough -- but the same image is used for both profiles so that the
+  # two differ in as few ways as possible.
+  verifier-api:
+    volumes:
+      - ./config/waltid-verifier:/waltid-verifier-api2/config:ro
+
+  wallet-api:
+    volumes:
+      - ./config/waltid-wallet:/waltid-wallet-api2/config:ro
+      - ./state-public/wallet:/data
+
 networks:
   demo:
     name: pki-in-did-public_demo

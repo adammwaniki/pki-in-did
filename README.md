@@ -7,6 +7,35 @@ that root certificate decides accept or reject — **with or without a network**
 Then the Issuing CA withdraws the accreditation, twice: once with OCSP, once with a CRL. The
 DID documents never change.
 
+And the part that makes the case: the same credential goes through **walt.id `verifier-api2`**,
+a production OpenID4VP 1.0 verifier. It returns `SUCCESSFUL` for a credential whose national
+certificate chain is **genuine but certifies a different key** — correctly, because validating
+`x5c` is not part of `did:web` or DID Core. The policy layer rejects it.
+
+|  | walt.id `verifier-api2` | PKI policy layer |
+|---|---|---|
+| accredited issuer | `SUCCESSFUL` | ACCEPTED |
+| impostor, borrowed chain | `SUCCESSFUL` | REJECTED `spki_jwk_mismatch` |
+
+That is the source document's *"the chain is decorative"*, shown against a third-party
+implementation rather than asserted.
+
+### What is off-the-shelf, and what is not
+
+| Component | What it is |
+|---|---|
+| Issuance | **walt.id `issuer-api2`** — a real OpenID4VCI 1.0 issuer, unmodified |
+| Holder | **walt.id `wallet-api2`** — a real wallet. It generates and holds the holder key, creates the DID, proves possession, stores credentials, and presents them over OpenID4VP |
+| Standards-conformant verification | **walt.id `verifier-api2`** — a real OpenID4VP 1.0 verifier with DCQL, unmodified except one root added to its JVM trust store |
+| The CA | stock `openssl ca` and `openssl ocsp` |
+| **The PKI policy layer** | `src/verifier/` — ours. Path validation to the national root, the SPKI-to-JWK binding, SAN URI, accreditation, revocation, and the offline cache |
+| Glue | `src/holder/wallet.py` — an HTTP client that drives the three services; it implements no protocol itself |
+
+So the credential is issued, held, presented and verified by production walt.id services
+throughout. The only code of ours in the trust decision is `src/verifier/`, and it is
+deliberately **not** a reimplementation of a credential verifier: it is the policy layer the
+specifications say you must add and do not define. That is why the demonstration runs both.
+
 ```
 did:web resolution
   → DID document
@@ -146,8 +175,9 @@ EC P-256 key + CSR (ours)
   → public JWK + x5c + x5t#S256                  → our did.json
 ```
 
-`src/holder/wallet.py` is a minimal holder that performs the pre-authorized-code flow: offer,
-token, nonce, proof, credential.
+walt.id `wallet-api2` is the holder. It generates the holder key, creates the `did:jwk`, runs
+the pre-authorized-code flow with DPoP-bound access tokens, proves possession and stores the
+credential. `src/holder/wallet.py` only asks it to.
 
 The join between the two halves is the `kid`. `issuer-api2` emits
 `<issuerDid>#<RFC 7638 thumbprint of the public JWK>`, so `30-did-documents.sh` computes the
@@ -173,6 +203,7 @@ record/record.sh all
 | `part2-happy-offline` | both accepted from cache, and `x5u` failing | `--network none` |
 | `part3-revocation-online` | OCSP revoked; then the CRL revocation window | demo network |
 | `part4-revocation-offline` | what a disconnected verifier can and cannot know | `--network none` |
+| `part5-the-gap` | walt.id's verifier and the policy layer on the same two credentials | demo network |
 
 Each part produces a `.cast`, a `.gif` and an `.mp4`. `asciinema`, `agg` and `ffmpeg` all live
 in the `recorder` image, so the host needs nothing installed. The narration lines are in the
@@ -237,7 +268,7 @@ PKI in DID.md            the source document (tabs K and C)
 config/                  domains.env · verifier-policy*.json · openssl/ · nginx/
 src/verifier/            the fifteen checks: credential, didweb, chain, revocation, policy, report, cli
 src/issuer/              JWK export, DID document builder, walt.id profile renderer
-src/holder/wallet.py     a minimal OpenID4VCI 1.0 holder
+src/holder/wallet.py     an HTTP client driving walt.id issuer-api2, wallet-api2 and verifier-api2
 scripts/                 the build, in the order the brief describes
 demo/                    the four recorded parts, with their narration
 tests/unit/              180 hermetic tests: every reject path, no Docker, no network
@@ -261,6 +292,7 @@ state/                   generated; state/offline holds the root key and is moun
 | `40-issue-credentials.sh` | issue over OpenID4VCI |
 | `50-publish-crl.sh` | publish a CRL — a deliberate, separate act |
 | `60-revoke.sh a\|b` | withdraw an accreditation, reason `$REVOCATION_REASON` |
+| `95-impostor.sh` | publish a DID document pasting a genuine chain beside an uncertified key |
 | `70-fingerprint.sh` | fetch the root, compare fingerprints, install the trust anchor |
 | `80-seed-offline-cache.sh` | prime the cache so the laptop can work disconnected |
 | `expire-crl.sh` | publish an already-expired CRL |

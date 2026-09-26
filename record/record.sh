@@ -93,17 +93,22 @@ case "$part" in
     record_one part4-revocation-offline "PAUSE=0 demo/part4-revocation-offline.sh" \
       "PKI in DIDs - part 4, revocation offline"
     ;;
+  part5)
+    record_one part5-the-gap "PAUSE=0 demo/part5-the-gap.sh" \
+      "PKI in DIDs - part 5, what a conformant verifier does not check"
+    ;;
   all)
     "$0" setup
     "$0" part1
     "$0" part2
     "$0" part3
     "$0" part4
+    "$0" part5
     echo
     echo "all recordings in $OUT"
     ;;
   *)
-    echo "usage: record/record.sh <setup|part1|part2|part3|part4|all>" >&2
+    echo "usage: record/record.sh <setup|part1|part2|part3|part4|part5|all>" >&2
     exit 2
     ;;
 esac

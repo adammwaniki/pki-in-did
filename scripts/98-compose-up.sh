@@ -33,11 +33,16 @@ else
   wait_for_port "$ISSUING_CA_DOMAIN" 80 60 || die "the Issuing CA did not come up"
 fi
 
-step "Wait for the two walt.id issuers"
+step "Wait for the walt.id services"
 for which in a b; do
   wait_for_port "issuer-$which-api" 7005 120 \
     || die "issuer-$which-api did not come up; try: compose logs issuer-$which-api"
   note "issuer-$which-api ready"
+done
+for entry in "wallet-api:7006" "verifier-api:7004"; do
+  wait_for_port "${entry%%:*}" "${entry##*:}" 120 \
+    || die "${entry%%:*} did not come up; try: compose logs ${entry%%:*}"
+  note "${entry%%:*} ready"
 done
 
 ok "the $DEMO_PROFILE stack is up"

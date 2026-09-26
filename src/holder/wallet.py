@@ -1,11 +1,19 @@
-"""A minimal OpenID4VCI 1.0 holder -- the wallet side of issuance.
+"""Drive walt.id `wallet-api2` -- the holder in this demonstration.
 
-walt.id `issuer-api2` only issues over OpenID4VCI, so a credential is obtained the way a
-wallet obtains one: create an offer, redeem the pre-authorized code for an access token,
-prove possession of a holder key, collect the credential.
+This file is a *client*. The wallet is a real service: it generates and holds the holder key,
+creates the DID, performs the OpenID4VCI 1.0 issuance flow (with DPoP-bound access tokens),
+stores credentials, and performs the OpenID4VP 1.0 presentation flow with DCQL. None of that
+protocol work happens here.
 
-The flow, and the two things that are easy to get wrong, are recorded in
-record/NOTES-waltid.md.
+    collect  ask the issuer for an offer, then have the wallet redeem it
+    present  create a verification session, then have the wallet present to it
+    import   put a credential the wallet did not receive into its store
+
+A handle is written beside each credential (`<credential>.wallet.json`) recording which wallet
+holds it, under which DID, with which credential id. Presenting needs all three.
+
+The endpoint shapes were established by a spike; record/NOTES-waltid.md records them, and the
+two that cost time.
 """
 
 from __future__ import annotations
@@ -20,178 +28,276 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, utils as asym_utils
-
 PRE_AUTHORIZED = "urn:ietf:params:oauth:grant-type:pre-authorized_code"
 
 
-def b64u(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+def _call(method: str, url: str, *, body=None, timeout: float = 120.0):
+    headers = {"Accept": "application/json"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            text = response.read().decode()
+            return response.status, (json.loads(text) if text.strip() else {})
+    except urllib.error.HTTPError as error:
+        text = error.read().decode()
+        try:
+            return error.code, json.loads(text)
+        except ValueError:
+            return error.code, {"raw": text}
+    except urllib.error.URLError as error:
+        raise SystemExit(f"wallet: cannot reach {url}: {error}") from error
 
 
-def compact(payload: dict) -> bytes:
-    return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+def _need(status: int, payload, what: str):
+    if not 200 <= status < 300:
+        raise SystemExit(f"wallet: {what} failed ({status}): {json.dumps(payload)[:400]}")
+    return payload
 
 
 class Wallet:
-    """A holder with one freshly generated key, which is all a pre-authorized offer needs."""
+    """A wallet held by walt.id wallet-api2, addressed over HTTP."""
 
-    def __init__(self, base_url: str, *, timeout: float = 20.0, verbose: bool = True):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
+    def __init__(self, base_url: str, *, verbose: bool = True):
+        self.base = base_url.rstrip("/")
         self.verbose = verbose
-        self.key = ec.generate_private_key(ec.SECP256R1())
-        numbers = self.key.public_key().public_numbers()
-        self.jwk = {
-            "crv": "P-256", "kty": "EC",
-            "x": b64u(numbers.x.to_bytes(32, "big")),
-            "y": b64u(numbers.y.to_bytes(32, "big")),
-        }
-        # did:jwk, so the issuer's `<subjectDid>` mapping has something to resolve. A proof
-        # carrying a bare `jwk` header instead fails with "Cannot find in context: subjectDid".
-        self.did = "did:jwk:" + b64u(compact(self.jwk))
 
-    # ------------------------------------------------------------------ plumbing
-
-    def _request(self, method: str, url: str, *, body=None, form=False, bearer=None):
-        headers = {"Accept": "application/json"}
-        data = None
-        if body is not None:
-            if form:
-                data = urllib.parse.urlencode(body).encode()
-                headers["Content-Type"] = "application/x-www-form-urlencoded"
-            else:
-                data = json.dumps(body).encode()
-                headers["Content-Type"] = "application/json"
-        if bearer:
-            headers["Authorization"] = f"Bearer {bearer}"
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return response.status, response.read().decode()
-        except urllib.error.HTTPError as error:
-            return error.code, error.read().decode()
-        except urllib.error.URLError as error:
-            raise SystemExit(f"wallet: cannot reach {url}: {error}") from error
-
-    def _step(self, number: int, what: str, status: int, detail: str = "") -> None:
+    def _step(self, number: int, what: str, detail: str = "") -> None:
         if self.verbose:
-            mark = "ok" if 200 <= status < 300 else "!!"
-            print(f"  {number}. [{mark}] {what} -> {status}{'  ' + detail if detail else ''}")
+            print(f"  {number}. [ok] {what}{'  ' + detail if detail else ''}")
 
-    def _json(self, status: int, body: str, what: str) -> dict:
-        if not 200 <= status < 300:
-            raise SystemExit(f"wallet: {what} failed with {status}: {body}")
-        try:
-            return json.loads(body)
-        except ValueError as exc:
-            raise SystemExit(f"wallet: {what} returned non-JSON: {body[:200]}") from exc
+    def create(self) -> tuple[str, str]:
+        """A fresh wallet with exactly one key, and a did:jwk over it.
 
-    def _local(self, url: str) -> str:
-        """Rewrite an advertised URL onto the base we can actually reach.
-
-        The issuer advertises whatever `baseUrl` says; inside the demo network the wallet
-        may be reaching it by a different name.
+        Exactly one key matters: the wallet binds its access token to a key with DPoP, and
+        signs the issuance proof with the key behind the DID it is given. In a wallet holding
+        several keys those can differ, and the issuer then rejects the proof as invalid_proof.
         """
-        parsed = urllib.parse.urlparse(url)
-        base = urllib.parse.urlparse(self.base_url)
-        return urllib.parse.urlunparse(parsed._replace(scheme=base.scheme, netloc=base.netloc))
+        wallet_id = _need(*_call("POST", f"{self.base}/wallet", body={}), "creating a wallet")["walletId"]
+        self._step(1, "wallet created", wallet_id)
 
-    def _sign(self, header: dict, payload: dict) -> str:
-        signing_input = f"{b64u(compact(header))}.{b64u(compact(payload))}".encode()
-        der = self.key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
-        r, s = asym_utils.decode_dss_signature(der)
-        return f"{signing_input.decode()}.{b64u(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))}"
+        key = _need(*_call("POST", f"{self.base}/wallet/{wallet_id}/keys/generate",
+                           body={"backend": "jwk", "keyType": "secp256r1"}),
+                    "generating a holder key")
+        self._step(2, "holder key generated", f"{key['keyType']} {key['keyId'][:16]}…")
 
-    # ---------------------------------------------------------------- the flow
+        did = _need(*_call("POST", f"{self.base}/wallet/{wallet_id}/dids/create",
+                           body={"method": "jwk", "keyId": key["keyId"]}),
+                    "creating a holder DID")["did"]
+        self._step(3, "holder DID created", f"{did[:44]}…")
+        return wallet_id, did
 
-    def collect(self, profile_id: str, *, subject: dict | None = None) -> str:
-        metadata = self._json(
-            *self._request("GET", f"{self.base_url}/.well-known/openid-credential-issuer/openid4vci"),
-            "fetching issuer metadata",
-        )
-        audience = metadata["credential_issuer"]
-        self._step(0, "issuer metadata", 200, audience)
+    def receive(self, wallet_id: str, did: str, offer_url: str) -> str:
+        received = _need(*_call("POST", f"{self.base}/wallet/{wallet_id}/credentials/receive",
+                                body={"offerUrl": offer_url, "did": did}),
+                         "redeeming the credential offer")
+        ids = received.get("credentialIds") or []
+        if not ids:
+            raise SystemExit(f"wallet: no credential was issued: {json.dumps(received)[:300]}")
+        self._step(5, "credential received and stored", ids[0])
+        return ids[0]
 
-        overrides = {"credentialData": {"credentialSubject": subject}} if subject else {}
-        status, body = self._request(
-            "POST", f"{self.base_url}/issuer2/credential-offers",
-            body={"profileId": profile_id, "authMethod": "PRE_AUTHORIZED", **({"runtimeOverrides": overrides} if overrides else {})},
-        )
-        created = self._json(status, body, "creating the credential offer")
-        self._step(1, "credential offer created", status, created["offerId"])
+    def import_raw(self, wallet_id: str, raw: str) -> str:
+        stored = _need(*_call("POST", f"{self.base}/wallet/{wallet_id}/credentials/import",
+                              body={"rawCredential": raw}),
+                       "importing a credential")
+        return stored["id"]
 
-        offer_uri = urllib.parse.parse_qs(
-            urllib.parse.urlparse(created["credentialOffer"]).query
-        )["credential_offer_uri"][0]
-        status, body = self._request("GET", self._local(offer_uri))
-        offer = self._json(status, body, "retrieving the credential offer")
-        code = offer["grants"][PRE_AUTHORIZED]["pre-authorized_code"]
-        configuration_id = offer["credential_configuration_ids"][0]
-        self._step(2, "offer retrieved", status, configuration_id)
+    def raw_credential(self, wallet_id: str, credential_id: str) -> str:
+        held = _need(*_call("GET", f"{self.base}/wallet/{wallet_id}/credentials/{credential_id}"),
+                     "reading the stored credential")
+        signed = (held.get("credential") or {}).get("signed")
+        if not signed:
+            raise SystemExit("wallet: the stored credential has no signed form")
+        return signed
 
-        status, body = self._request(
-            "POST", f"{self.base_url}/openid4vci/token",
-            body={"grant_type": PRE_AUTHORIZED, "pre-authorized_code": code}, form=True,
-        )
-        token = self._json(status, body, "redeeming the pre-authorized code")
-        self._step(3, "access token issued", status)
+    def present(self, wallet_id: str, did: str, request_url: str) -> dict:
+        return _need(*_call("POST", f"{self.base}/wallet/{wallet_id}/credentials/present",
+                            body={"requestUrl": request_url, "did": did}),
+                     "presenting the credential")
 
-        status, body = self._request("POST", f"{self.base_url}/openid4vci/nonce")
-        nonce = self._json(status, body, "fetching a nonce")["c_nonce"]
-        self._step(4, "nonce issued", status)
 
-        proof = self._sign(
-            {"typ": "openid4vci-proof+jwt", "alg": "ES256", "kid": f"{self.did}#0"},
-            {"aud": audience, "iat": int(time.time()), "nonce": nonce},
-        )
-        status, body = self._request(
-            "POST", f"{self.base_url}/openid4vci/credential",
-            body={"credential_configuration_id": configuration_id, "proofs": {"jwt": [proof]}},
-            bearer=token["access_token"],
-        )
-        issued = self._json(status, body, "requesting the credential")
-        credential = issued["credentials"][0]["credential"]
-        self._step(5, "credential issued", status, f"{len(credential)} characters")
-        return credential
+def request_offer(issuer_base: str, profile: str, *, subject: dict | None = None) -> str:
+    """Ask the issuer for a pre-authorized offer. This is the issuer's side, not the wallet's."""
+    body: dict = {"profileId": profile, "authMethod": "PRE_AUTHORIZED"}
+    if subject:
+        body["runtimeOverrides"] = {"credentialData": {"credentialSubject": subject}}
+    created = _need(*_call("POST", f"{issuer_base.rstrip('/')}/issuer2/credential-offers",
+                           body=body), "creating a credential offer")
+    return created["credentialOffer"]
+
+
+def open_verification_session(verifier_base: str, credential_type: str,
+                              *, query_id: str = "c1") -> tuple[str, str]:
+    """Ask the verifier for a session, and return its id and the wallet-facing request URL."""
+    setup = {
+        "flow_type": "cross_device",
+        "core_flow": {
+            "dcql_query": {
+                "credentials": [{
+                    "id": query_id,
+                    "format": "jwt_vc_json",
+                    "meta": {"type_values": [["VerifiableCredential", credential_type]]},
+                }]
+            }
+        },
+    }
+    created = _need(*_call("POST", f"{verifier_base.rstrip('/')}/verification-session/create",
+                           body=setup), "creating a verification session")
+    return created["sessionId"], created["fullAuthorizationRequestUrl"]
+
+
+def verification_result(verifier_base: str, session_id: str, *, tries: int = 12) -> dict:
+    for _ in range(tries):
+        status, session = _call(
+            "GET", f"{verifier_base.rstrip('/')}/verification-session/{session_id}/info")
+        if 200 <= status < 300 and session.get("status") in (
+                "SUCCESSFUL", "FAILED", "UNSUCCESSFUL"):
+            return session
+        time.sleep(1)
+    raise SystemExit("wallet: the verifier never reached a terminal status")
+
+
+def summarise_policies(session: dict) -> list[str]:
+    """The verifier's own policy results, flattened."""
+    lines: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("policy_executed", "results"):
+                    continue
+                if isinstance(value, dict) and isinstance(value.get("success"), bool):
+                    lines.append(f"{'pass' if value['success'] else 'FAIL'}  {key}")
+                walk(value)
+
+    walk(session.get("policy_results") or {})
+    return sorted(set(lines))
 
 
 def describe(credential: str) -> str:
-    header_segment = credential.split(".", 1)[0]
-    header = json.loads(base64.urlsafe_b64decode(
-        header_segment + "=" * (-len(header_segment) % 4)
-    ))
-    chain = header.get("x5c", [])
+    raw = credential.split(".", 1)[0]
+    header = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
     return (f"      typ {header.get('typ')}   alg {header.get('alg')}\n"
             f"      kid {header.get('kid')}\n"
-            f"      x5c {len(chain)} certificate(s) in the JOSE header")
+            f"      x5c {len(header.get('x5c', []))} certificate(s) in the JOSE header")
+
+
+def _handle_path(credential_path: str) -> Path:
+    return Path(credential_path).with_suffix(".wallet.json")
+
+
+def _save_handle(credential_path: str, wallet_base: str, wallet_id: str, did: str,
+                 credential_id: str) -> Path:
+    path = _handle_path(credential_path)
+    path.write_text(json.dumps({
+        "wallet": wallet_base, "walletId": wallet_id,
+        "did": did, "credentialId": credential_id,
+    }, indent=2))
+    return path
+
+
+def _load_handle(credential_path: str) -> dict:
+    path = _handle_path(credential_path)
+    if not path.exists():
+        raise SystemExit(
+            f"wallet: no handle at {path}. A credential can only be presented by the wallet "
+            "holding it; run `collect` or `import` first."
+        )
+    return json.loads(path.read_text())
+
+
+# ------------------------------------------------------------------------ commands
+
+def _collect(args) -> int:
+    wallet = Wallet(args.wallet, verbose=not args.quiet)
+    wallet_id, did = wallet.create()
+
+    offer = request_offer(args.issuer, args.profile,
+                          subject={"operatorName": args.operator_name,
+                                   "licenceNumber": args.licence})
+    if not args.quiet:
+        print(f"  4. [ok] offer received from the issuer  {offer[:58]}…")
+
+    credential_id = wallet.receive(wallet_id, did, offer)
+    raw = wallet.raw_credential(wallet_id, credential_id)
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(raw)
+    handle = _save_handle(args.out, args.wallet, wallet_id, did, credential_id)
+
+    if not args.quiet:
+        print(describe(raw))
+        print(f"      exported to {out}")
+        print(f"      held by wallet {wallet_id} ({handle.name})")
+    return 0
+
+
+def _import(args) -> int:
+    wallet = Wallet(args.wallet, verbose=not args.quiet)
+    wallet_id, did = wallet.create()
+    raw = Path(args.credential).read_text().strip()
+    credential_id = wallet.import_raw(wallet_id, raw)
+    handle = _save_handle(args.credential, args.wallet, wallet_id, did, credential_id)
+    if not args.quiet:
+        print(f"  imported into wallet {wallet_id} as {credential_id}")
+        print(f"  handle {handle}")
+    return 0
+
+
+def _present(args) -> int:
+    handle = _load_handle(args.credential)
+    wallet = Wallet(handle.get("wallet", args.wallet), verbose=not args.quiet)
+
+    session_id, request_url = open_verification_session(args.verifier, args.type)
+    if not args.quiet:
+        print(f"  1. [ok] verification session created  {session_id}")
+
+    wallet.present(handle["walletId"], handle["did"], request_url)
+    if not args.quiet:
+        print("  2. [ok] wallet presented the credential over OpenID4VP")
+
+    session = verification_result(args.verifier, session_id)
+    if args.json:
+        print(json.dumps(session, indent=2))
+    elif not args.quiet:
+        print(f"\n  the verifier's own verdict: {session.get('status')}")
+        for line in summarise_policies(session):
+            print(f"      {line}")
+    return 0 if session.get("status") == "SUCCESSFUL" else 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--issuer", required=True, help="base URL of the issuer-api2 instance")
-    parser.add_argument("--profile", default="accreditedOperatorCredential")
-    parser.add_argument("--out", required=True, help="where to write the credential")
-    parser.add_argument("--operator-name", default="Demonstration Holder")
-    parser.add_argument("--licence", default="OP-2026-0001")
-    parser.add_argument("--quiet", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--wallet", default="http://wallet-api:7006",
+                        help="base URL of the walt.id wallet-api2 instance")
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    wallet = Wallet(args.issuer, verbose=not args.quiet)
-    if not args.quiet:
-        print(f"  holder {wallet.did[:48]}…")
-    credential = wallet.collect(
-        args.profile,
-        subject={"operatorName": args.operator_name, "licenceNumber": args.licence},
-    )
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(credential)
-    if not args.quiet:
-        print(describe(credential))
-        print(f"      saved to {out}")
-    return 0
+    c = sub.add_parser("collect", help="have the wallet obtain a credential over OpenID4VCI")
+    c.add_argument("--issuer", required=True)
+    c.add_argument("--profile", default="accreditedOperatorCredential")
+    c.add_argument("--out", required=True, help="where to export the raw credential")
+    c.add_argument("--operator-name", default="Demonstration Holder")
+    c.add_argument("--licence", default="OP-2026-0001")
+    c.add_argument("--quiet", action="store_true")
+
+    i = sub.add_parser("import", help="put a credential into a wallet's store directly")
+    i.add_argument("--credential", required=True)
+    i.add_argument("--quiet", action="store_true")
+
+    p = sub.add_parser("present", help="have the wallet present a credential over OpenID4VP")
+    p.add_argument("--verifier", required=True)
+    p.add_argument("--credential", required=True)
+    p.add_argument("--type", default="AccreditedOperatorCredential")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--quiet", action="store_true")
+
+    args = parser.parse_args()
+    return {"collect": _collect, "import": _import, "present": _present}[args.command](args)
 
 
 if __name__ == "__main__":

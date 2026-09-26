@@ -523,11 +523,60 @@ first and renders afterwards, so a rejection (exit 1) is an answer rather than a
 |---|---|---|
 | Let's Encrypt on three real domains | a Web-TLS CA inside the stack | section 3 |
 | an offline machine or VM for the root | a `ca-tools` container run with `--network none`, the key mounted nowhere else | the same isolation property, reproducible, enforced by Docker |
-| `openssl ocsp` behind nginx (step 16) | `src/ca/revocation_service.py` behind nginx | `openssl ca` cannot express `privilegeWithdrawn` on OpenSSL 3.5.8 LTS; section 10 |
+| (superseded) a bespoke responder | `openssl ocsp` behind nginx, as step 16 says | `openssl ca` cannot express `privilegeWithdrawn` on OpenSSL 3.5.8 LTS; section 10 |
 | one credential per issuer | one per issuer, `vc+jwt` only | `issuer-api2` is OpenID4VCI/JOSE only; the Data Integrity shape is unit-tested |
 | `x5c` | `x5c`, plus an `x5u` variant document | needed to show why `x5c` is the offline-capable choice |
 | three verifier rules | fifteen checks | the brief's three plus everything tab C §5 requires, notably the SPKI-to-JWK binding |
 | an expired CRL by short life and a wait | a CRL dated in the past | a short life cannot be waited out inside the skew tolerance |
+
+## 16a. A real verifier, and the gap it leaves
+
+The plan had the demonstration's own code doing all verification. That was a weakness: the
+central claim is about what a *conformant* verifier does not check, and asserting it in code of
+our own proves nothing. Added after the build, on the question being asked directly.
+
+Three walt.id services now do all the protocol work, and none of it is ours:
+
+| Service | Role |
+|---|---|
+| `issuer-api2` | issues over OpenID4VCI 1.0 |
+| `wallet-api2` | holds the key, the DID and the credentials; receives and presents |
+| `verifier-api2` | verifies over OpenID4VP 1.0 with DCQL |
+
+`src/holder/wallet.py` is a 300-line HTTP client that drives them. It replaced a hand-rolled
+OpenID4VCI and OpenID4VP implementation of about the same size, which was the right call for
+the same reason: a demonstration about interoperability should not depend on our reading of
+the specifications.
+
+`src/verifier/` is therefore not a credential verifier and should not be read as one. It is the
+**PKI policy layer**: path validation to the national root, the SPKI-to-JWK binding, the SAN
+URI rule, accreditation, revocation, and the offline cache. Those are the checks the
+specifications require someone to add and do not define.
+
+The two are run against the same credentials, and disagree exactly where the source document
+says they will:
+
+|  | walt.id `verifier-api2` | PKI policy layer |
+|---|---|---|
+| accredited issuer | `SUCCESSFUL` | ACCEPTED |
+| impostor with a borrowed chain | `SUCCESSFUL` | REJECTED `spki_jwk_mismatch` |
+
+`scripts/95-impostor.sh` builds the second row. Nothing in it is forged: the chain is the real
+issuer A certificate and the real Issuing CA, and it validates to the National Root CA. It
+simply does not certify the key published beside it. `verifier-api2` accepts it because
+validating `x5c` is not its job, and `tests/integration/test_waltid_verifier.py` asserts that
+no policy it runs mentions `x5c`, `x5u`, `chain`, `x509` or `pkix` -- so the premise is checked
+against the implementation rather than believed.
+
+Two consequences worth recording:
+
+- **A real verifier resolves `did:web` over real DNS and real TLS.** The first attempt failed
+  on the signature policy because it fetched the public `jacarandapropaganda.com`, which serves
+  unrelated content. `images/verifier-api/Dockerfile` adds the demonstration's Web-TLS root to
+  the JVM trust store, keeping resolution over HTTPS instead of downgrading it to plain HTTP.
+  The public profile needs no such layer.
+- **A wallet that discards its holder key cannot present anything.** Issuance now writes
+  `<credential>.holder.json` beside each credential.
 
 ## 17. Where the build departed from the original plan
 
@@ -545,6 +594,9 @@ These departures are recorded here because no other file records them.
 | cache files `cache/ocsp/<ca>-<serial>.der`, `cache/crl/<ca>.crl` | JSON wrappers with base64 DER and a `storedAt` stamp, keyed by digest |
 | seven policy settings | eighteen. `require_x5c` was declared but read by nothing, and was in any case `allow_x5u` inverted, so it has been removed: a JWK with no chain is rejected unconditionally, because with no chain there is nothing to validate. |
 | `demo/part0-setup` | as planned, and it runs `10-offline-root.sh` first so the offline machine is on camera |
+| all verification done by our own code | walt.id `verifier-api2` does the conformant half; `src/verifier` is the PKI policy layer. See section 16a -- this was the plan's most substantive weakness. |
+| our own holder client | walt.id `wallet-api2`. The hand-rolled OpenID4VCI/OpenID4VP client is gone; `src/holder/wallet.py` is now an HTTP client of three real services. |
+| reason code `privilegeWithdrawn` | `cessationOfOperation`, which stock `openssl ca` can express, so brief steps 16 and 18 are literal. `REVOCATION_REASON` changes it. The bespoke responder that could emit `privilegeWithdrawn` was removed once that trade was accepted. |
 | `src/verifier/cache`, `src/issuer/export_issuer_jwk.py`, `scripts/25-waltid-profiles` | `store.py`, `jwkexport.py`, `25-waltid-config.sh` |
 | an `offline-ca` image and a `verifier` service | neither; both are `docker run` invocations |
 | two credentials per issuer | one; see section 7 |

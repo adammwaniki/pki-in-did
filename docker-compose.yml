@@ -152,6 +152,77 @@ services:
       start_period: 30s
     <<: *logging
 
+  # The holder: walt.id wallet-api2. It generates and holds the holder key, creates the DID,
+  # runs the OpenID4VCI issuance flow with DPoP-bound tokens, stores credentials, and runs the
+  # OpenID4VP presentation flow. src/holder/wallet.py only drives it over HTTP.
+  wallet-api:
+    image: ${WALLET_API_IMAGE:-waltid/wallet-api2:1.0.0}
+    container_name: pki-wallet-api
+    restart: unless-stopped
+    volumes:
+      - ./config/waltid-wallet:/waltid-wallet-api2/config:ro
+      - ./state/wallet:/data
+    networks:
+      demo:
+        aliases: [ "wallet-api" ]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7006"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    <<: *logging
+
+  # The impostor. Serves one DID document, whose JWK carries a genuine national certificate
+  # chain beside a key that chain does not certify. Nothing here is forged; see
+  # src/issuer/make_impostor.py for why that is the point.
+  impostor-web:
+    build: { context: ., dockerfile: images/web/Dockerfile }
+    image: pki-in-did/web
+    container_name: pki-impostor-web
+    restart: unless-stopped
+    environment:
+      ISSUER_DOMAIN: ${IMPOSTOR_DOMAIN:-impostor.example}
+    volumes:
+      - ./config/nginx/issuer.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./state/web/impostor:/srv/issuer:ro
+      - ./state/tls:/tls:ro
+    networks:
+      demo:
+        aliases: [ "${IMPOSTOR_DOMAIN:-impostor.example}" ]
+    <<: *logging
+
+  # A real verifier: walt.id verifier-api2, OpenID4VP 1.0 with DCQL.
+  #
+  # It is here to make an argument rather than to do our job. It performs the standards-
+  # conformant half of verification -- resolve the DID, check the presentation and the
+  # credential signature -- and it does NOT look at x5c, because no conformant verifier does.
+  # That is precisely the gap the source document describes, and demo/part5-the-gap.sh shows
+  # it: this service returns SUCCESSFUL for a credential whose certificate chain is
+  # decorative, and the PKI policy layer in src/verifier rejects it.
+  #
+  # The image adds the demonstration's Web-TLS root to the JVM trust store so that did:web
+  # resolution can happen over HTTPS on this network. See images/verifier-api/Dockerfile.
+  verifier-api:
+    build:
+      context: .
+      dockerfile: images/verifier-api/Dockerfile
+    image: pki-in-did/verifier-api
+    container_name: pki-verifier-api
+    restart: unless-stopped
+    volumes:
+      - ./config/waltid-verifier:/waltid-verifier-api2/config:ro
+    networks:
+      demo:
+        aliases: [ "verifier-api" ]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/7004"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    <<: *logging
+
 networks:
   demo:
     name: pki-in-did_demo
